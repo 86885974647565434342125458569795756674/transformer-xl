@@ -500,7 +500,6 @@ def train(log_loss):
                 log_str += ' | ppl {:9.3f}'.format(math.exp(cur_loss))
 
             # logging(log_str)
-            print(train_step)
 
             train_loss = 0
             log_start_time = time.time()
@@ -566,10 +565,7 @@ plt.plot(X,Y_train,label="train_loss")
 plt.xlabel('train_step')
 plt.ylabel('train_loss')    
 plt.legend()
-path="/share/logs"    
-if not os.path.exists(path):         
-    os.makedirs(path)
-plt.savefig(os.path.join(path,"train_loss.png"))    
+plt.savefig(os.path.join(args.work_dir,"train_loss.png"))    
 
 # Load the best saved model.
 with open(os.path.join(args.work_dir, 'model.pt'), 'rb') as f:

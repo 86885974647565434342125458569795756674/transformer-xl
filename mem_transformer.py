@@ -116,7 +116,7 @@ class MultiHeadAttn(nn.Module):
             if attn_mask.dim() == 2:
                 attn_score.masked_fill_(attn_mask[None,:,:,None], -float('inf'))
             elif attn_mask.dim() == 3:
-                attn_score.masked_fill_(attn_mask[:,:,:,None], -float('inf'))
+                attn_score.masked_fill_(attn_mask[:,:,:,None].bool(), -float('inf'))
 
         # [qlen x klen x bsz x n_head]
         attn_prob = F.softmax(attn_score, dim=1)
@@ -224,9 +224,13 @@ class RelPartialLearnableMultiHeadAttn(RelMultiHeadAttn):
                 w_heads = self.qkv_net(self.layer_norm(cat))
             else:
                 w_heads = self.qkv_net(cat)
+            
             r_head_k = self.r_net(r)
+            #W_{k,R}R
 
             w_head_q, w_head_k, w_head_v = torch.chunk(w_heads, 3, dim=-1)
+            #EW_q,EW_{k,E},EW_v
+
             w_head_q = w_head_q[-qlen:]
         else:
             if self.pre_lnorm:
@@ -247,9 +251,11 @@ class RelPartialLearnableMultiHeadAttn(RelMultiHeadAttn):
 
         #### compute attention score
         rw_head_q = w_head_q + r_w_bias                                         # qlen x bsz x n_head x d_head
+        #EW_q+u,W_{k,E}E
         AC = torch.einsum('ibnd,jbnd->ijbn', (rw_head_q, w_head_k))             # qlen x klen x bsz x n_head
 
         rr_head_q = w_head_q + r_r_bias
+        #EW_q+v,W_{k,R}R
         BD = torch.einsum('ibnd,jnd->ijbn', (rr_head_q, r_head_k))              # qlen x klen x bsz x n_head
         
         BD = self._rel_shift(BD)
@@ -741,7 +747,7 @@ class MemTransformerLM(nn.Module):
 
         core_out = self.drop(core_out)
 
-        new_mems = self._update_mems(hids, mems, mlen, qlen)
+        new_mems = self._update_mems(hids, mems, qlen, mlen)
 
         return core_out, new_mems
 
