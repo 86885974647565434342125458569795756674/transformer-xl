@@ -218,7 +218,7 @@ class RelPartialLearnableMultiHeadAttn(RelMultiHeadAttn):
     def forward(self, w, r, r_w_bias, r_r_bias, attn_mask=None, mems=None):
         qlen, rlen, bsz = w.size(0), r.size(0), w.size(1)
 
-        if mems is not None:
+        if mems is not None:	
             cat = torch.cat([mems, w], 0)
             if self.pre_lnorm:
                 w_heads = self.qkv_net(self.layer_norm(cat))
@@ -278,6 +278,8 @@ class RelPartialLearnableMultiHeadAttn(RelMultiHeadAttn):
         attn_prob = F.softmax(attn_score, dim=1)
 
         sum_prob = torch.sum(attn_prob.detach(),(0,2,3))
+        #zero_count = attn_mask.shape[0] * attn_mask.shape[2] - torch.count_nonzero(attn_mask.detach(),(0,2))
+        #avg_prob = sum_prob / zero_count
 
         attn_prob = self.dropatt(attn_prob)
 
@@ -651,9 +653,8 @@ class MemTransformerLM(nn.Module):
             end_idx = mlen + max(0, qlen - 0 - self.ext_len)
             beg_idx = max(0, end_idx - self.mem_len)
             for i in range(len(hids)):
-
-                cat = torch.cat([mems[i], hids[i]], dim=0)
-                new_mems.append(cat[beg_idx:end_idx].detach())
+                cat = torch.cat([mems[i][0], hids[i][0]], dim=0)
+                new_mems.append([cat[beg_idx:end_idx].detach(),torch.arange(0,0)])
 
         return new_mems
 
@@ -695,7 +696,7 @@ class MemTransformerLM(nn.Module):
                 mems_i = None if mems is None else mems[i][0]
                 core_out, _ = layer(core_out, pos_emb, self.r_w_bias,
                         self.r_r_bias, dec_attn_mask=dec_attn_mask, mems=mems_i)
-                hids.append([core_out,torch.arrange(0,0)])
+                hids.append([core_out,torch.arange(0,0)])
         elif self.attn_type == 1: # learnable
             core_out = self.drop(word_emb)
             hids.append(core_out)
@@ -726,7 +727,7 @@ class MemTransformerLM(nn.Module):
                     mems_i += pos_emb[:mlen]
                 core_out = layer(core_out, dec_attn_mask=dec_attn_mask,
                                  mems=mems_i)
-                hids.append([core_out,torch.arrange(0,0)])
+                hids.append([core_out,torch.arange(0,0)])
         elif self.attn_type == 3:
             core_out = self.drop(word_emb)
 
@@ -771,7 +772,7 @@ class MemTransformerLM(nn.Module):
                 
                 _, topk_index = torch.topk(sum_prob, min(self.mem_len,len(pos_seq)))
                 topk_index_sort, _ = torch.sort(topk_index)
-
+                
                 hids_i = hids_i.detach()[topk_index_sort]
                 poss_i = pos_seq[topk_index_sort]
 
