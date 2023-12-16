@@ -276,6 +276,9 @@ class RelPartialLearnableMultiHeadAttn(RelMultiHeadAttn):
 
         # [qlen x klen x bsz x n_head]
         attn_prob = F.softmax(attn_score, dim=1)
+
+        sum_prob = torch.sum(attn_prob.detach(),(0,2,3))
+
         attn_prob = self.dropatt(attn_prob)
 
         #### compute attention vector
@@ -296,7 +299,7 @@ class RelPartialLearnableMultiHeadAttn(RelMultiHeadAttn):
             ##### residual connection + layer normalization
             output = self.layer_norm(w + attn_out)
 
-        return output
+        return output, sum_prob
 
 class RelLearnableMultiHeadAttn(RelMultiHeadAttn):
     def __init__(self, *args, **kwargs):
@@ -430,13 +433,13 @@ class RelPartialLearnableDecoderLayer(nn.Module):
 
     def forward(self, dec_inp, r, r_w_bias, r_r_bias, dec_attn_mask=None, mems=None):
 
-        output = self.dec_attn(dec_inp, r, r_w_bias, r_r_bias,
+        output, sum_prob = self.dec_attn(dec_inp, r, r_w_bias, r_r_bias,
                                attn_mask=dec_attn_mask,
                                mems=mems)
         
         output = self.pos_ff(output)
 
-        return output
+        return output, sum_prob
 
 
 class AdaptiveEmbedding(nn.Module):
@@ -534,7 +537,7 @@ class MemTransformerLM(nn.Module):
         self.attn_type = attn_type
 
         self.layers = nn.ModuleList()
-        if attn_type == 0: # the default attention
+        if attn_type in [0,4]: # the default attention or cyy
             # cyy
             for i in range(n_layer):
                 self.layers.append(
@@ -595,7 +598,7 @@ class MemTransformerLM(nn.Module):
         self.sample_softmax = -1
 
     def _create_params(self):
-        if self.attn_type == 0: # default attention
+        if self.attn_type in [0,4]: # default attention or cyy
             # cyy
             self.pos_emb = PositionalEmbedding(self.d_model)
             self.r_w_bias = nn.Parameter(torch.Tensor(self.n_head, self.d_head))
@@ -623,8 +626,9 @@ class MemTransformerLM(nn.Module):
             mems = []
             param = next(self.parameters())
             for i in range(self.n_layer+1):
-                empty = torch.empty(0, dtype=param.dtype, device=param.device)
-                mems.append(empty)
+                hid_empty = torch.empty(0, dtype=param.dtype, device=param.device)
+                pos_empty = torch.arange(0,0)
+                mems.append([hid_empty,pos_empty])
 
             return mems
         else:
@@ -658,8 +662,7 @@ class MemTransformerLM(nn.Module):
 
         word_emb = self.word_emb(dec_inp)
         
-        # 0
-        mlen = mems[0].size(0) if mems is not None else 0
+        mlen = mems[0][0].size(0) if mems is not None else 0
         klen = mlen + qlen
         if self.same_length:
             all_ones = word_emb.new_ones(qlen, klen)
@@ -687,12 +690,12 @@ class MemTransformerLM(nn.Module):
             core_out = self.drop(word_emb)
             pos_emb = self.drop(pos_emb)
 
-            hids.append(core_out)
+            hids.append([core_out,torch.arange(0,0)])
             for i, layer in enumerate(self.layers):
-                mems_i = None if mems is None else mems[i]
-                core_out = layer(core_out, pos_emb, self.r_w_bias,
+                mems_i = None if mems is None else mems[i][0]
+                core_out, _ = layer(core_out, pos_emb, self.r_w_bias,
                         self.r_r_bias, dec_attn_mask=dec_attn_mask, mems=mems_i)
-                hids.append(core_out)
+                hids.append([core_out,torch.arrange(0,0)])
         elif self.attn_type == 1: # learnable
             core_out = self.drop(word_emb)
             hids.append(core_out)
@@ -703,10 +706,10 @@ class MemTransformerLM(nn.Module):
                 else:
                     r_emb, r_bias = self.r_emb[i], self.r_bias[i]
 
-                mems_i = None if mems is None else mems[i]
+                mems_i = None if mems is None else mems[i][0]
                 core_out = layer(core_out, r_emb, self.r_w_bias[i],
                         r_bias, dec_attn_mask=dec_attn_mask, mems=mems_i)
-                hids.append(core_out)
+                hids.append([core_out,torch.arange(0,0)])
         elif self.attn_type == 2: # absolute
             pos_seq = torch.arange(klen - 1, -1, -1.0, device=word_emb.device,
                                    dtype=word_emb.dtype)
@@ -718,18 +721,18 @@ class MemTransformerLM(nn.Module):
 
             hids.append(core_out)
             for i, layer in enumerate(self.layers):
-                mems_i = None if mems is None else mems[i]
+                mems_i = None if mems is None else mems[i][0]
                 if mems_i is not None and i == 0:
                     mems_i += pos_emb[:mlen]
                 core_out = layer(core_out, dec_attn_mask=dec_attn_mask,
                                  mems=mems_i)
-                hids.append(core_out)
+                hids.append([core_out,torch.arrange(0,0)])
         elif self.attn_type == 3:
             core_out = self.drop(word_emb)
 
             hids.append(core_out)
             for i, layer in enumerate(self.layers):
-                mems_i = None if mems is None else mems[i]
+                mems_i = None if mems is None else mems[i][0]
                 if mems_i is not None and mlen > 0:
                     cur_emb = self.r_emb[i][:-qlen]
                     cur_size = cur_emb.size(0)
@@ -743,11 +746,40 @@ class MemTransformerLM(nn.Module):
 
                 core_out = layer(core_out, dec_attn_mask=dec_attn_mask,
                                  mems=mems_i)
-                hids.append(core_out)
+                hids.append([core_out,torch.arange(0,0)])
+        elif self.attn_type == 4: # cyy
+
+            core_out = self.drop(word_emb)
+
+            for i, layer in enumerate(self.layers):
+                pos_seq = torch.arange(0,0) if mems is None else mems[i][1] + qlen 
+                pos_seq = pos_seq.to(word_emb.device,word_emb.dtype) 
+                pos_seq = torch.cat([pos_seq,torch.arange(qlen-1, -1, -1.0, device=word_emb.device, 
+                                   dtype=word_emb.dtype)],0)
+                if self.clamp_len > 0:
+                    pos_seq.clamp_(max=self.clamp_len)
+            
+                pos_emb = self.pos_emb(pos_seq)
+                pos_emb = self.drop(pos_emb)
+                
+                hids_i = core_out
+                mems_i = None if mems is None else mems[i][0]
+                hids_i = hids_i if mems is None else torch.cat([mems_i, hids_i],dim=0)
+
+                core_out, sum_prob = layer(core_out, pos_emb, self.r_w_bias,
+                        self.r_r_bias, dec_attn_mask=dec_attn_mask, mems=mems_i)
+                
+                _, topk_index = torch.topk(sum_prob, min(self.mem_len,len(pos_seq)))
+                topk_index_sort, _ = torch.sort(topk_index)
+
+                hids_i = hids_i.detach()[topk_index_sort]
+                poss_i = pos_seq[topk_index_sort]
+
+                hids.append([hids_i,poss_i])
 
         core_out = self.drop(core_out)
 
-        new_mems = self._update_mems(hids, mems, qlen, mlen)
+        new_mems = self._update_mems(hids, mems, qlen, mlen) if self.attn_type!=4 else hids
 
         return core_out, new_mems
 

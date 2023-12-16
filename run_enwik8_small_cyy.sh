@@ -23,4 +23,5 @@ python train.py \
 	--eval-interval 100 \
 	--log-interval 100 \
 	--max_eval_step 500 \
-	--work_dir /share/enwik8_small_cyy
+	--work_dir /share/enwik8_small_cyy \
+	--attn_type 4
