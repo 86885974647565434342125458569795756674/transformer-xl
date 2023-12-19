@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export CUDA_VISIBLE_DEVICES=0
+
 echo 'Run training...'
 python train.py \
         --cuda \
@@ -15,13 +17,13 @@ python train.py \
         --optim adam \
         --lr 0.00012 \
         --warmup_step 0 \
-        --max_step 1000 \
+        --max_step 10000 \
         --tgt_len 256 \
         --mem_len 0 \
         --eval_tgt_len 64 \
         --batch_size 11 \
 	--eval-interval 100 \
 	--log-interval 100 \
-	--max_eval_step 500 \
+	--max_eval_step 100 \
 	--work_dir /share/enwik8_small_vanilla \
 	--attn_type 2

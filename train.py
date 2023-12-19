@@ -421,7 +421,7 @@ def evaluate(eval_iter):
     return total_loss / total_len
 
 
-def train(log_loss):
+def train(log_train_loss,log_eval_loss):
     # Turn on training mode which enables dropout.
     global train_step, train_loss, best_val_loss, eval_start_time, log_start_time
     model.train()
@@ -487,7 +487,7 @@ def train(log_loss):
         if train_step % args.log_interval == 0:
             cur_loss = train_loss / args.log_interval
 
-            log_loss.append(cur_loss)
+            log_train_loss.append(cur_loss)
 
             elapsed = time.time() - log_start_time
             log_str = '| epoch {:3d} step {:>8d} | {:>6d} batches | lr {:.3g} ' \
@@ -507,6 +507,8 @@ def train(log_loss):
         if train_step % args.eval_interval == 0:
             
             val_loss = evaluate(va_iter)
+            log_eval_loss.append(val_loss)
+
             logging('-' * 100)
             log_str = '| Eval {:3d} at step {:>8d} | time: {:5.2f}s ' \
                       '| valid loss {:5.2f}'.format(
@@ -542,7 +544,8 @@ def train(log_loss):
 train_step = 0
 train_loss = 0
 best_val_loss = None
-log_loss=[]
+log_train_loss=[]
+log_eval_loss=[]
 
 log_start_time = time.time()
 eval_start_time = time.time()
@@ -550,7 +553,7 @@ eval_start_time = time.time()
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     for epoch in itertools.count(start=1):
-        train(log_loss)
+        train(log_train_loss,log_eval_loss)
         if train_step == args.max_step:
             logging('-' * 100)
             logging('End of training')
@@ -560,12 +563,16 @@ except KeyboardInterrupt:
     logging('Exiting from training early')
 
 X=np.arange(0, train_step, args.log_interval, dtype=int)
-Y_train=np.array(log_loss)
-plt.plot(X,Y_train,label="train_loss")  
+Y_train=np.array(log_train_loss)
+Y_eval=np.array(log_eval_loss)
+plt.plot(X,Y_train,label="train_loss")
+plt.plot(X,Y_eval,label="eval_loss")  
 plt.xlabel('train_step')
-plt.ylabel('train_loss')    
+plt.ylabel('loss')    
 plt.legend()
-plt.savefig(os.path.join(args.work_dir,"train_loss.png"))    
+plt.savefig(os.path.join(args.work_dir,"loss.png"))   
+np.save(os.path.join(args.work_dir,"Y_train.png"),Y_train)
+np.save(os.path.join(args.work_dir,"Y_eval.png"),Y_eval) 
 
 # Load the best saved model.
 with open(os.path.join(args.work_dir, 'model.pt'), 'rb') as f:
